@@ -3,14 +3,14 @@ title: 'TFG: IA Explicable sobre datos transcriptómicos de cáncer basados en o
 author: "Alberto"
 date: "`r Sys.Date()`"
 output:
-  pdf_document:
-    toc: true
   html_document:
     toc: true
     toc_float: true
     theme: flatly
     number_sections: true
     code_folding: show
+  pdf_document:
+    toc: true
 ---
 
 ```{r setup, include=FALSE}
@@ -42,6 +42,7 @@ library(e1071)
 library(kernlab)
 library(Rtsne)
 library(ggplot2)
+library(pROC)
 ```
 
 ## Datos de expresión génica
@@ -249,6 +250,11 @@ bwplot(difValues, layout = c(3, 1))
 ```{r guardar_TN, include=FALSE}
 svm_TN = svm
 rf_TN = rf2
+
+# Objetos guardados para evitar que se pisen después al reutilizar train_set/test_set
+train_set_TN <- train_set
+test_set_TN <- test_set
+all_data_TN <- all_data
 ```
 
 ### Evaluación en test set: Random Forest
@@ -540,8 +546,8 @@ svm_onco <- train(formula, data = train_set_f2, method = "svmRadial", tuneLength
 ## Comparación Fase 1 vs Fase 2
 
 ```{r comparacion_fases}
-res_f1_rf = postResample(predict(rf_TN, newdata = test_set), test_set$type)
-res_f1_svm = postResample(predict(svm_TN, newdata = test_set), test_set$type)
+res_f1_rf = postResample(predict(rf_TN, newdata = test_set_TN), test_set_TN$type)
+res_f1_svm = postResample(predict(svm_TN, newdata = test_set_TN), test_set_TN$type)
 res_f2_rf = postResample(predict(rf2_onco, newdata = test_set_f2), test_set_f2$type)
 res_f2_svm = postResample(predict(svm_onco, newdata = test_set_f2), test_set_f2$type)
 
@@ -616,6 +622,74 @@ knitr::kable(tabla_modelos, digits = 4,
              caption = "Comparación de los cuatro modelos sobre el conjunto de oncogenes")
 ```
 
+
+### Métricas complementarias de los cuatro modelos
+
+Además de las métricas básicas, calculamos precisión, F1-score, balanced accuracy, AUC y MCC para evaluar los modelos de forma más completa, especialmente teniendo en cuenta el desbalance entre clases.
+
+```{r metricas_complementarias_modelos}
+extra_metrics <- function(model, test_data, positive_class = "Normal") {
+  
+  pred_class <- predict(model, newdata = test_data)
+  pred_prob <- predict(model, newdata = test_data, type = "prob")
+  
+  cm <- confusionMatrix(
+    pred_class,
+    test_data$type,
+    positive = positive_class,
+    mode = "everything"
+  )
+  
+  roc_obj <- roc(
+    response = test_data$type,
+    predictor = pred_prob[[positive_class]],
+    levels = c("Tumor", "Normal"),
+    quiet = TRUE
+  )
+  
+  auc_value <- auc(roc_obj)
+  
+  tab <- cm$table
+  
+  TP <- tab[positive_class, positive_class]
+  FP <- sum(tab[positive_class, ]) - TP
+  FN <- sum(tab[, positive_class]) - TP
+  TN <- sum(tab) - TP - FP - FN
+  
+  mcc <- ((TP * TN) - (FP * FN)) /
+    sqrt((TP + FP) * (TP + FN) * (TN + FP) * (TN + FN))
+  
+  data.frame(
+    Accuracy = as.numeric(cm$overall["Accuracy"]),
+    Kappa = as.numeric(cm$overall["Kappa"]),
+    Sensitivity = as.numeric(cm$byClass["Sensitivity"]),
+    Specificity = as.numeric(cm$byClass["Specificity"]),
+    Precision = as.numeric(cm$byClass["Precision"]),
+    F1 = as.numeric(cm$byClass["F1"]),
+    Balanced_Accuracy = as.numeric(cm$byClass["Balanced Accuracy"]),
+    AUC = as.numeric(auc_value),
+    MCC = as.numeric(mcc)
+  )
+}
+
+rf_metrics <- extra_metrics(rf2_onco, test_set_f2)
+svm_metrics <- extra_metrics(svm_onco, test_set_f2)
+gbm_metrics <- extra_metrics(gbm_onco, test_set_f2)
+nnet_metrics <- extra_metrics(nnet_onco, test_set_f2)
+
+metrics_extra <- rbind(
+  Random_Forest = rf_metrics,
+  SVM = svm_metrics,
+  Gradient_Boosting = gbm_metrics,
+  Red_Neuronal = nnet_metrics
+)
+
+knitr::kable(
+  round(metrics_extra, 4),
+  caption = "Comparación ampliada de los cuatro modelos entrenados con oncogenes sobre el conjunto de prueba"
+)
+```
+
 ```{r figura_comparacion_modelos}
 # Pasar la tabla a formato largo (sin dependencias externas) para graficar
 tabla_larga <- data.frame(
@@ -636,6 +710,150 @@ ggsave("figuras/comparacion_modelos.png", p_comp_modelos, width = 10, height = 6
 ```
 
 **Conclusión:** la SVM es el mejor modelo en exactitud, kappa y sensibilidad, clasificando correctamente todas las muestras normales (la clase minoritaria); solo el Random Forest la supera ligeramente en especificidad, al no clasificar ningún tumor como normal. Ni el Gradient Boosting ni la red neuronal superan a la SVM, lo que respalda centrar el análisis en modelos simples e interpretables: en estos datos no hay que renunciar a rendimiento para ganar interpretabilidad.
+
+
+## Análisis de sensibilidad del preprocesado
+
+El procedimiento original ajusta las transformaciones de preprocesado sobre la unión de entrenamiento y prueba. Aunque son operaciones no supervisadas, el procedimiento más estricto consiste en ajustar el preprocesado únicamente sobre el conjunto de entrenamiento y aplicarlo después al conjunto de prueba. Para comprobar si esta decisión afecta a las conclusiones principales, se repite el entrenamiento de Random Forest y SVM con un preprocesado ajustado exclusivamente sobre entrenamiento.
+
+```{r sensibilidad_preprocesado, cache=TRUE}
+# Reconstruimos train/test de Fase 2 antes del preprocesado conjunto
+normal_train_raw <- normal_train_set_f2
+normal_train_raw$type <- "Normal"
+
+tumor_train_raw <- tumor_train_set_f2
+tumor_train_raw$type <- "Tumor"
+
+normal_test_raw <- normal_test_set_f2
+normal_test_raw$type <- "Normal"
+
+tumor_test_raw <- tumor_test_set_f2
+tumor_test_raw$type <- "Tumor"
+
+train_raw <- rbind(normal_train_raw, tumor_train_raw)
+test_raw  <- rbind(normal_test_raw, tumor_test_raw)
+
+train_raw$type <- factor(train_raw$type, levels = c("Normal", "Tumor"))
+test_raw$type  <- factor(test_raw$type, levels = c("Normal", "Tumor"))
+
+# Separar variables y clase
+x_train_raw <- train_raw[, setdiff(names(train_raw), "type")]
+y_train <- train_raw$type
+
+x_test_raw <- test_raw[, setdiff(names(test_raw), "type")]
+y_test <- test_raw$type
+
+# Nombres válidos y consistentes para caret
+colnames(x_train_raw) <- ifelse(
+  grepl("^g_", colnames(x_train_raw)),
+  colnames(x_train_raw),
+  paste0("g_", colnames(x_train_raw))
+)
+
+colnames(x_test_raw) <- colnames(x_train_raw)
+
+# nearZeroVar solo en entrenamiento
+nzv_idx <- nearZeroVar(x_train_raw)
+
+if (length(nzv_idx) > 0) {
+  x_train_nzv <- x_train_raw[, -nzv_idx]
+  x_test_nzv  <- x_test_raw[, -nzv_idx]
+} else {
+  x_train_nzv <- x_train_raw
+  x_test_nzv  <- x_test_raw
+}
+
+# Preprocesado ajustado solo con train
+preproc_train_only <- preProcess(
+  x_train_nzv,
+  method = c("YeoJohnson", "center", "scale")
+)
+
+x_train_pp <- predict(preproc_train_only, x_train_nzv)
+x_test_pp  <- predict(preproc_train_only, x_test_nzv)
+
+train_pp <- data.frame(x_train_pp, type = y_train)
+test_pp  <- data.frame(x_test_pp, type = y_test)
+
+train_control_pp <- trainControl(
+  method = "cv",
+  number = 10,
+  classProbs = TRUE,
+  summaryFunction = twoClassSummary,
+  savePredictions = "final"
+)
+
+set.seed(123)
+rf_train_only <- train(
+  type ~ .,
+  data = train_pp,
+  method = "rf",
+  metric = "ROC",
+  trControl = train_control_pp,
+  tuneLength = 10
+)
+
+set.seed(123)
+svm_train_only <- train(
+  type ~ .,
+  data = train_pp,
+  method = "svmRadial",
+  metric = "ROC",
+  trControl = train_control_pp,
+  tuneLength = 10
+)
+
+# Métricas del análisis train-only
+rf_train_only_metrics <- extra_metrics(rf_train_only, test_pp)
+svm_train_only_metrics <- extra_metrics(svm_train_only, test_pp)
+
+metrics_original_rf_svm <- metrics_extra[c("Random_Forest", "SVM"), ]
+
+comparacion_preprocesado <- rbind(
+  Random_Forest_original = metrics_original_rf_svm["Random_Forest", ],
+  Random_Forest_train_only = rf_train_only_metrics,
+  SVM_original = metrics_original_rf_svm["SVM", ],
+  SVM_train_only = svm_train_only_metrics
+)
+
+knitr::kable(
+  round(comparacion_preprocesado[, c(
+    "Accuracy",
+    "Kappa",
+    "Sensitivity",
+    "Specificity",
+    "AUC",
+    "MCC"
+  )], 4),
+  caption = "Comparación entre el procedimiento original y el preprocesado ajustado exclusivamente sobre entrenamiento"
+)
+```
+
+```{r matrices_confusion_train_only}
+cat("=== Random Forest con preprocesado train-only ===\n")
+
+rf_train_only_pred <- predict(rf_train_only, newdata = test_pp)
+
+confusionMatrix(
+  rf_train_only_pred,
+  test_pp$type,
+  positive = "Normal",
+  mode = "everything"
+)
+
+cat("\n=== SVM con preprocesado train-only ===\n")
+
+svm_train_only_pred <- predict(svm_train_only, newdata = test_pp)
+
+confusionMatrix(
+  svm_train_only_pred,
+  test_pp$type,
+  positive = "Normal",
+  mode = "everything"
+)
+```
+
+**Conclusión del análisis de sensibilidad:** los resultados se mantienen muy próximos a los obtenidos con el procedimiento original. En Random Forest se observa una ligera disminución del rendimiento, pero mantiene el mismo patrón de error. En la SVM no se observan cambios en las métricas principales. Por tanto, aunque el procedimiento original de preprocesado no era metodológicamente óptimo, su impacto práctico sobre las conclusiones principales es reducido.
 
 # Fase 3: Explicabilidad (XAI)
 
@@ -946,6 +1164,55 @@ knitr::kable(comparacion_tecnicas, caption = "Comparación varImp vs SHAP")
 
 Se observa un **75% de coincidencia** (15 de 20 genes). Esto indica que varImp identifica correctamente la mayoría de genes importantes, pero SHAP revela genes adicionales y además proporciona información que varImp no puede: la dirección y magnitud de la contribución por paciente individual.
 
+### Índice de Jaccard entre varImp y SHAP
+
+Para cuantificar el solapamiento entre ambos rankings, se calcula también el índice de Jaccard entre los veinte genes principales de varImp y los veinte genes principales de SHAP.
+
+```{r jaccard_varimp_shap}
+jaccard_index <- function(a, b) {
+  length(intersect(a, b)) / length(union(a, b))
+}
+
+top_varimp <- as.character(top20_varimp)
+top_shap <- as.character(top20_shap_global$gen)
+
+top_varimp <- top_varimp[!is.na(top_varimp)]
+top_shap <- top_shap[!is.na(top_shap)]
+
+genes_comunes <- intersect(top_varimp, top_shap)
+solo_varimp <- setdiff(top_varimp, top_shap)
+solo_shap <- setdiff(top_shap, top_varimp)
+
+tabla_jaccard <- data.frame(
+  Comparacion = "varImp vs SHAP",
+  Top_N = 20,
+  Genes_Comunes = length(genes_comunes),
+  Coincidencia_Top20 = length(genes_comunes) / 20,
+  Jaccard = jaccard_index(top_varimp, top_shap)
+)
+
+knitr::kable(
+  tabla_jaccard,
+  digits = 4,
+  caption = "Solapamiento entre los veinte genes principales según varImp y SHAP"
+)
+
+comparacion_jaccard_detalle <- data.frame(
+  Grupo = c("Genes comunes", "Solo en varImp", "Solo en SHAP"),
+  N = c(length(genes_comunes), length(solo_varimp), length(solo_shap)),
+  Genes = c(
+    paste(genes_comunes, collapse = ", "),
+    paste(solo_varimp, collapse = ", "),
+    paste(solo_shap, collapse = ", ")
+  )
+)
+
+knitr::kable(
+  comparacion_jaccard_detalle,
+  caption = "Detalle de genes compartidos y exclusivos entre varImp y SHAP"
+)
+```
+
 ## PDP: Partial Dependence Plots
 
 Los PDP muestran cómo cambia la predicción cuando varía la expresión de un gen concreto, manteniendo el resto constantes.
@@ -1013,6 +1280,8 @@ La app no forma parte de este notebook: vive en el archivo `app.R` del repositor
 5. **SHAP:** FOXA1, KCNJ5 y PLAG1 son los oncogenes que más empujan las predicciones tumorales. NFE2L2, FOXA1 e IL6ST son los que más empujan hacia normal. El 75% de los genes del ranking SHAP coincide con varImp.
 
 6. **PDP:** Los oncogenes top muestran relaciones no lineales con umbrales. RF y SVM coinciden en la dirección pero difieren en la forma de la transición.
+
+7. **Análisis de sensibilidad del preprocesado:** al repetir RF y SVM con un preprocesado ajustado exclusivamente sobre el conjunto de entrenamiento, los resultados se mantienen prácticamente equivalentes. La SVM no cambia sus métricas principales y Random Forest solo muestra una ligera bajada, por lo que la posible fuga de información del preprocesado original no parece alterar las conclusiones principales.
 
 ```{r sesion}
 sessionInfo()
