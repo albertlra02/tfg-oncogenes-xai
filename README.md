@@ -31,18 +31,21 @@ La aplicación tiene finalidad académica y demostrativa. No está validada para
 ## Estructura del repositorio
 
 ```text
-TFG_Notebook.Rmd      Notebook principal con todo el análisis en R Markdown.
-TFG_Notebook.pdf      Notebook ejecutado con resultados, tablas y figuras.
-app.R                 Aplicación Shiny interactiva.
-datos_app.RData       Modelos y datos necesarios para ejecutar la app.
-figuras/              Figuras generadas por el notebook.
-figuras/anexo/        Figuras individuales de explicabilidad usadas en el anexo.
-sources/              Carpeta donde deben colocarse los datos de entrada.
+src/TFG_Notebook.Rmd        Notebook principal con todo el análisis en R Markdown.
+src/TFG_Notebook.pdf        Notebook ejecutado con resultados, tablas y figuras.
+app/app.R                   Aplicación Shiny interactiva.
+app/datos_app.RData         Modelos y datos necesarios para ejecutar la app.
+figuras/                    Figuras generadas por el notebook.
+figuras/anexo/              Figuras individuales de explicabilidad usadas en el anexo.
+datos/input/README_datos.md Archivo descriptivo sobre los datos de entrada necesarios.
+sources/                    Carpeta local donde deben colocarse los datos de entrada para ejecutar el notebook.
 ```
 
 ## Datos
 
-Los datos de expresión génica no se incluyen en el repositorio por su tamaño y porque proceden de fuentes públicas externas. Para reproducir el análisis hay que descargarlos y colocarlos en una carpeta llamada `sources/`.
+Los datos de expresión génica no se incluyen en el repositorio por su tamaño y porque proceden de fuentes públicas externas. Para reproducir el análisis hay que descargarlos y colocarlos en una carpeta local llamada `sources/`, que es la ruta utilizada por el notebook `src/TFG_Notebook.Rmd`.
+
+La carpeta `datos/input/` se incluye para mantener la estructura solicitada del repositorio y documentar los ficheros necesarios para reproducir el trabajo, pero los datos reales no se redistribuyen en este repositorio.
 
 ### Datos de expresión RNA-seq
 
@@ -88,17 +91,15 @@ install.packages(c(
 ### Reproducir el análisis
 
 1. Clonar el repositorio.
-2. Crear una carpeta `sources/`.
+2. Crear una carpeta local `sources/` en la raíz del proyecto.
 3. Descargar los ficheros de expresión génica y el fichero de NCG.
 4. Colocar todos los datos en `sources/`.
-5. Abrir `TFG_Notebook.Rmd` en RStudio.
+5. Abrir `src/TFG_Notebook.Rmd` en RStudio.
 6. Ejecutar el notebook con `Knit`.
 
 Las figuras se guardan automáticamente en la carpeta `figuras/`.
 
-Para consultar los resultados sin ejecutar el análisis, puede abrirse directamente el archivo `TFG_Notebook.pdf`.
-
-### Ejecutar la aplicación Shiny
+Para consultar los resultados sin ejecutar el análisis, puede abrirse directamente el archivo `src/TFG_Notebook.pdf`.
 
 ### Ejecutar la aplicación Shiny
 
@@ -108,8 +109,8 @@ La aplicación puede consultarse directamente desde la demo web:
 
 También puede ejecutarse localmente:
 
-1. Abrir `app.R` en RStudio.
-2. Comprobar que el archivo `datos_app.RData` está en el directorio del proyecto.
+1. Abrir `app/app.R` en RStudio.
+2. Comprobar que el archivo `app/datos_app.RData` está disponible junto a la aplicación.
 3. Pulsar `Run App`.
 
 La aplicación permite elegir un modelo, seleccionar una muestra del conjunto de prueba y visualizar la predicción junto con una explicación local generada mediante LIME.
@@ -126,7 +127,9 @@ La aplicación permite elegir un modelo, seleccionar una muestra del conjunto de
 
 ## Limitaciones
 
-Este repositorio tiene finalidad académica. Los modelos no están validados para uso clínico y no deben interpretarse como herramientas diagnósticas. Una limitación importante del diseño es que las muestras tumorales proceden de TCGA y las muestras sanas de GTEx, por lo que no puede descartarse completamente la presencia de efecto de lote. Además, las técnicas de explicabilidad utilizadas proporcionan interpretaciones asociativas, no causales.
+Este repositorio tiene finalidad académica. Los modelos no están validados para uso clínico y no deben interpretarse como herramientas diagnósticas.
+
+Una limitación importante del diseño es que las muestras tumorales proceden de TCGA y las muestras sanas de GTEx, por lo que no puede descartarse completamente la presencia de efecto de lote. Además, las técnicas de explicabilidad utilizadas proporcionan interpretaciones asociativas, no causales: que un gen sea importante para el modelo no implica que sea necesariamente una diana terapéutica.
 
 ## Licencia
 
@@ -139,3 +142,4 @@ Del Giudice, M. et al. (2021). *Artificial intelligence in bulk and single-cell 
 Wang, Q. et al. (2018). *Unifying cancer and normal RNA sequencing data from different sources*. Scientific Data, 5, 180061.
 
 Repana, D. et al. (2019). *The Network of Cancer Genes: a comprehensive catalogue of known and candidate cancer genes*. Genome Biology, 20, 1.
+
